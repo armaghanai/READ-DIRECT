@@ -7,15 +7,16 @@ import spacy
 import math
 import struct
 import numpy as np
-from collections import defaultdict
+from collections import defaultdict, OrderedDict
 
 class SearchEngine:
     def __init__(self):
         self.index_dir = r"d:\MyProjects\DigitalLibrary\books_data\index"
         self.lexicon_file = r"d:\MyProjects\DigitalLibrary\books_data\lexicon.csv"
         self.glove_path = r"d:\MyProjects\DigitalLibrary\embeddings\glove.6B.100d.bin"
+        self.delta_file = os.path.join(self.index_dir, "delta_index.bin")
         
-        print("Initializing Optimized Search Engine... (Loading data into RAM)", flush=True)
+        print("Initializing Search Engine... (Loading data into RAM)", flush=True)
         start_time = time.time()
         
         # 1. Load Lexicon
@@ -35,29 +36,32 @@ class SearchEngine:
         with open(os.path.join(self.index_dir, "idf_values.bin"), "rb") as f:
             self.idf_values = pickle.load(f)
             
-        # 4. Load Optimized Metadata Cache
+        # 4. Load Metadata Cache
         with open(os.path.join(self.index_dir, "metadata_cache.bin"), "rb") as f:
             self.metadata_cache = pickle.load(f)
             
         # 5. Load Autocomplete Trie
-        with open(os.path.join(self.index_dir, "autocomplete_trie.bin"), "rb") as f:
-            self.trie_root = pickle.load(f)
+        self.trie_file = os.path.join(self.index_dir, "autocomplete_trie.bin")
+        self.trie_mtime = 0
+        self.trie_root = None
+        self.load_trie()
 
-        # 6. Load Semantic Data & Unified Indexing
+        # 6. Load Semantic Data & Main Index
         self.doc_vectors = np.load(os.path.join(self.index_dir, "doc_vectors.npy"))
         with open(os.path.join(self.index_dir, "vector_isbns.bin"), "rb") as f:
             self.vector_isbns = pickle.load(f)
-        
-        # Map ISBN to NumPy index for fast vectorized access
         self.isbn_to_idx = {isbn: i for i, isbn in enumerate(self.vector_isbns)}
 
-        # 7. Load BM25 Doc Multipliers into NumPy array
         with open(os.path.join(self.index_dir, "doc_multipliers.bin"), "rb") as f:
             raw_multipliers = pickle.load(f)
-            # Reorder multipliers to match vector_isbns order
             self.bm25_multipliers = np.array([raw_multipliers.get(isbn, 0.0) for isbn in self.vector_isbns], dtype=np.float32)
 
-        # 8. Load GloVe word vectors (Filtered by Lexicon)
+        # 7. Load Incremental Delta Index
+        self.delta_data = None
+        self.delta_mtime = 0
+        self.load_delta()
+
+        # 8. Filtered GloVe word vectors
         self.glove = {}
         with open(self.glove_path, 'rb') as f:
             header = f.read(8)
@@ -69,12 +73,44 @@ class SearchEngine:
                 if word in self.lexicon:
                     self.glove[word] = np.array(vector, dtype=np.float32)
 
-        # 9. Initialize spaCy
+        # 9. LRU Cache
+        self.cache = OrderedDict()
+        self.cache_size = 10
+
+        # 10. spaCy
         self.nlp = spacy.load('en_core_web_sm', disable=['parser', 'ner'])
         self.barrel_cache = {}
 
         end_time = time.time()
         print(f"Search Engine ready! Startup took {end_time - start_time:.2f} seconds.", flush=True)
+
+    def load_trie(self):
+        if os.path.exists(self.trie_file):
+            current_mtime = os.path.getmtime(self.trie_file)
+            if current_mtime > self.trie_mtime:
+                try:
+                    with open(self.trie_file, 'rb') as f:
+                        self.trie_root = pickle.load(f)
+                    self.trie_mtime = current_mtime
+                    print("Autocomplete Trie reloaded.")
+                except:
+                    pass
+
+    def load_delta(self):
+        if os.path.exists(self.delta_file):
+            current_mtime = os.path.getmtime(self.delta_file)
+            if current_mtime > self.delta_mtime:
+                try:
+                    with open(self.delta_file, 'rb') as f:
+                        self.delta_data = pickle.load(f)
+                    self.delta_mtime = current_mtime
+                    # Reload Trie as well
+                    self.load_trie()
+                    # Clear cache when index changes
+                    self.cache.clear()
+                    print(f"Delta index updated ({len(self.delta_data['isbns'])} new books). Cache cleared.")
+                except:
+                    pass
 
     def get_word_id(self, word):
         return self.lexicon.get(word.lower())
@@ -97,15 +133,21 @@ class SearchEngine:
         return curr['s']
 
     def hybrid_search(self, query, top_n=10):
+        self.load_delta() # Check for updates
+        
+        # Check Cache
+        if query in self.cache:
+            print("[CACHE HIT]")
+            self.cache.move_to_end(query)
+            return self.cache[query], 0.0
+
         start_time = time.time()
         doc = self.nlp(query.lower())
         query_words = [token.lemma_ for token in doc if token.is_alpha and not token.is_stop]
         if not query_words: query_words = query.lower().split()
 
-        # --- 1. Vectorized Keyword Path (BM25) ---
-        # We calculate BM25 scores for ALL docs using NumPy
-        bm25_total_scores = np.zeros(self.total_docs, dtype=np.float32)
-        
+        # --- 1. Main Search (Vectorized) ---
+        bm25_total = np.zeros(self.total_docs, dtype=np.float32)
         for word in query_words:
             w_id = self.get_word_id(word)
             if w_id:
@@ -113,21 +155,13 @@ class SearchEngine:
                 barrel_id = (w_id - 1) // 10000
                 barrel_data = self.load_barrel(barrel_id)
                 hit_isbns = barrel_data.get(w_id, [])
-                
-                # Convert ISBN hits to NumPy indices
                 indices = [self.isbn_to_idx[isbn] for isbn in hit_isbns if isbn in self.isbn_to_idx]
                 if indices:
-                    # Score = IDF * Multiplier
-                    bm25_total_scores[indices] += float(idf) * self.bm25_multipliers[indices]
+                    bm25_total[indices] += float(idf) * self.bm25_multipliers[indices]
 
-        # Normalize Keyword scores to [0,1]
-        kw_max = np.max(bm25_total_scores)
-        if kw_max > 0:
-            norm_kw_scores = bm25_total_scores / kw_max
-        else:
-            norm_kw_scores = bm25_total_scores
-
-        # --- 2. Vectorized Semantic Path ---
+        kw_max = np.max(bm25_total)
+        norm_kw = bm25_total / kw_max if kw_max > 0 else bm25_total
+        
         semantic_scores = np.zeros(self.total_docs, dtype=np.float32)
         query_vecs = [self.glove[w] for w in query_words if w in self.glove]
         
@@ -135,40 +169,69 @@ class SearchEngine:
             q_vec = np.mean(query_vecs, axis=0)
             q_norm = np.linalg.norm(q_vec)
             if q_norm > 0: q_vec = q_vec / q_norm
-            
-            # Efficient matrix dot product
             semantic_scores = np.dot(self.doc_vectors, q_vec)
-            # Thresholding (lower irrelevant matches)
             semantic_scores[semantic_scores < 0.35] = 0
 
-        # --- 3. Hybrid Combination (60% KW / 40% SEM) ---
-        final_scores = (0.6 * norm_kw_scores) + (0.4 * semantic_scores)
-
-        # --- 4. Result Retrieval ---
-        # Get top indices
-        top_indices = np.argsort(final_scores)[-top_n:][::-1]
+        # Combine Main
+        main_final = (0.6 * norm_kw) + (0.4 * semantic_scores)
         
-        results = []
-        for idx in top_indices:
-            score = float(final_scores[idx])
-            if score <= 0: continue # Skip if no match at all
+        # Pick top ones from main but also check Delta
+        combined_candidates = []
+        for idx in np.argsort(main_final)[-top_n:][::-1]:
+            score = float(main_final[idx])
+            if score > 0:
+                isbn = self.vector_isbns[idx]
+                combined_candidates.append((isbn, score, "main"))
+
+        # --- 2. Delta Search ---
+        if self.delta_data and self.delta_data["isbns"]:
+            delta_kw = defaultdict(float)
+            for word in query_words:
+                if word in self.delta_data["keywords"]:
+                    idf = self.idf_values.get(self.get_word_id(word), 2.0) # Approx IDF for delta
+                    for isbn in self.delta_data["keywords"][word]:
+                        delta_kw[isbn] += idf # Simplified BM25 for delta
             
-            isbn = self.vector_isbns[idx]
-            meta = self.metadata_cache.get(isbn, ["Unknown"]*5)
+            delta_sem = np.zeros(len(self.delta_data["isbns"]), dtype=np.float32)
+            if query_vecs:
+                delta_vec_matrix = np.array(self.delta_data["vectors"])
+                delta_sem = np.dot(delta_vec_matrix, q_vec)
+                delta_sem[delta_sem < 0.35] = 0
+            
+            # Combine Delta
+            delta_max_kw = max(delta_kw.values()) if delta_kw else 1.0
+            for i, isbn in enumerate(self.delta_data["isbns"]):
+                kw_s = delta_kw.get(isbn, 0.0) / delta_max_kw
+                sem_s = delta_sem[i]
+                final_s = (0.6 * kw_s) + (0.4 * sem_s)
+                if final_s > 0:
+                    combined_candidates.append((isbn, final_s, "delta"))
+
+        # --- 3. Final Merge & Sort ---
+        combined_candidates.sort(key=lambda x: x[1], reverse=True)
+        results = []
+        for isbn, score, source in combined_candidates[:top_n]:
+            if source == "main":
+                meta = self.metadata_cache.get(isbn, ["Unknown"]*5)
+            else:
+                meta = self.delta_data["metadata"].get(isbn, ["Unknown"]*5)
+                
             results.append({
                 "isbn": isbn, "score": score, "title": meta[0],
-                "publisher": meta[1], "year": meta[2], "image_url": meta[3], "rating": meta[4],
-                "kw_score": float(norm_kw_scores[idx]),
-                "sem_score": float(semantic_scores[idx])
+                "publisher": meta[1], "year": meta[2], "image_url": meta[3], "rating": meta[4]
             })
-            
+
         duration = time.time() - start_time
+        # Store in Cache
+        self.cache[query] = results
+        if len(self.cache) > self.cache_size:
+            self.cache.popitem(last=False)
+            
         return results, duration
 
 def main():
     engine = SearchEngine()
-    print("\n--- Digital Library Hybrid Search (Optimized) ---")
-    print("Commands: 'suggest <prefix>', or just enter your query.")
+    print("\n--- Digital Library Hybrid Search (Incremental & Cached) ---")
     while True:
         try:
             query = input("\nQuery: ").strip()
@@ -182,15 +245,14 @@ def main():
                 continue
 
             results, duration = engine.hybrid_search(query)
-            print(f"\nHybrid Results for '{query}' ({duration*1000:.2f} ms):")
+            print(f"\nResults for '{query}' ({duration*1000:.2f} ms):")
             
             if not results:
                 print("No matches found.")
             else:
                 for i, res in enumerate(results, 1):
                     print(f"{i}. [{res['isbn']}] {res['title']}")
-                    print(f"   Score: {res['score']:.4f} (KW: {res['kw_score']:.2f}, SEM: {res['sem_score']:.2f})")
-                    print(f"   Publisher: {res['publisher']} ({res['year']}) | Rating: {res['rating']}")
+                    print(f"   Score: {res['score']:.4f} | Publisher: {res['publisher']} ({res['year']}) | Rating: {res['rating']}/10")
                     print(f"   Image: {res['image_url']}")
                     print("-" * 30)
                 
