@@ -212,14 +212,33 @@ class SearchEngine:
         results = []
         for isbn, score, source in combined_candidates[:top_n]:
             if source == "main":
-                meta = self.metadata_cache.get(isbn, ["Unknown"]*5)
+                raw_meta = self.metadata_cache.get(isbn, ["Unknown"]*6)
             else:
-                meta = self.delta_data["metadata"].get(isbn, ["Unknown"]*5)
-                
+                raw_meta = self.delta_data["metadata"].get(isbn, ["Unknown"]*6)
+            
+            # Robust unpacking: handle 5-field vs 6-field metadata
+            # 5 fields: [Title, Publisher, Year, Image, Rating]
+            # 6 fields: [Title, Author, Publisher, Year, Image, Rating]
+            if len(raw_meta) == 5:
+                # Pad with 'Unknown' author at index 1
+                meta = [raw_meta[0], "Unknown", raw_meta[1], raw_meta[2], raw_meta[3], raw_meta[4]]
+            else:
+                meta = raw_meta
+
+            final_score = float(score)
+            try:
+                if float(meta[5]) == 0:
+                    final_score *= 0.5 # Penalty for books with 0 rating
+            except: pass
+
             results.append({
-                "isbn": isbn, "score": score, "title": meta[0],
-                "publisher": meta[1], "year": meta[2], "image_url": meta[3], "rating": meta[4]
+                "isbn": isbn, "score": final_score, "title": meta[0],
+                "author": meta[1], "publisher": meta[2], "year": meta[3], 
+                "image_url": meta[4], "rating": meta[5]
             })
+
+        # Re-sort after penalty
+        results.sort(key=lambda x: x["score"], reverse=True)
 
         duration = time.time() - start_time
         # Store in Cache
@@ -231,7 +250,10 @@ class SearchEngine:
 
 def main():
     engine = SearchEngine()
-    print("\n--- Digital Library Hybrid Search (Incremental & Cached) ---")
+    print("\n" + "="*50)
+    print("--- Digital Library Hybrid Search (Incremental & Cached) ---")
+    print("Developed by Armaghan Mahmood Shams")
+    print("="*50)
     while True:
         try:
             query = input("\nQuery: ").strip()

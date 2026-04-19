@@ -75,6 +75,7 @@ def precalculate():
             isbn = str(row['ISBN'])
             metadata_cache[isbn] = [
                 str(row['Book-Title']),
+                str(row['Book-Author']),
                 str(row['Publisher']),
                 str(row['Year-Of-Publication']),
                 str(row['Image-URL-L']),

@@ -87,6 +87,7 @@ class IncrementalIndexer:
 
             details = [
                 str(row['Book-Title']),
+                str(row['Book-Author']),
                 str(row['Publisher']),
                 str(row['Year-Of-Publication']),
                 image_url,
