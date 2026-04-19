@@ -43,7 +43,16 @@ def precalculate():
         
     avg_dl = total_tokens / N
     print(f"Average Document Length: {avg_dl}", flush=True)
+
+    # Pre-calculate BM25 Doc Multipliers (for f(q,d)=1 case)
+    # Multiplier = (k1 + 1) / (1 + k1 * (1 - b + b * (L(d) / avg_dl)))
+    k1, b = 1.5, 0.75
+    doc_multipliers = {}
+    for isbn, length in doc_lengths.items():
+        m = (k1 + 1) / (1 + k1 * (1 - b + b * (length / avg_dl)))
+        doc_multipliers[isbn] = float(m)
     
+    print("Saving stats and multipliers...", flush=True)
     stats = {
         "avg_dl": avg_dl,
         "total_docs": N
@@ -53,6 +62,9 @@ def precalculate():
         
     with open(os.path.join(index_dir, "doc_lengths.bin"), "wb") as f:
         pickle.dump(doc_lengths, f, protocol=pickle.HIGHEST_PROTOCOL)
+
+    with open(os.path.join(index_dir, "doc_multipliers.bin"), "wb") as f:
+        pickle.dump(doc_multipliers, f, protocol=pickle.HIGHEST_PROTOCOL)
 
     print("Building Metadata Cache from books.csv...", flush=True)
     metadata_cache = {}
