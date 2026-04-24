@@ -25,7 +25,7 @@ A high-performance, dynamic archival literature search engine constructed entire
 
 ## Execution
 
-Ensure that your `backend/.env` file is generated with `ADMIN_API_KEY=admin123`.
+Ensure that your `backend/.env` file is generated with `ADMIN_API_KEY=your-admin-key`.
 
 ### 1. Boot the Backend & Watcher
 The NLP engine dynamically boots its own watcher daemon natively upon port allocation.
@@ -45,4 +45,4 @@ npm run dev
 Navigate to `http://localhost:5173` entirely bypassing cloud latency. 
 
 ## Contribution & Authentication
-To add new books to the physical disc arrays or adjust the 1-10 overall trailing average ratings, interact with the floating **CONTRIBUTE FOLIO** button respectively. You will be elegantly prompted by the UI to supply the `.env`-stored Admin key configuration string natively blocking unauthorized database modifications.
+To add new books to the physical disc arrays or adjust the 1-10 overall trailing average ratings, interact with the floating **CONTRIBUTE FOLIO** button respectively. You will be elegantly for the password if you have the access.

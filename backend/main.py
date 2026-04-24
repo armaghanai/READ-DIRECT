@@ -91,15 +91,34 @@ async def add_book(entry: BookEntry, x_api_key: str = Header(None)):
         
         file_exists = os.path.exists(filepath)
         
-        # 3. CSV Row preparation
-        # ISBN;Book-Title;Book-Author;Year-Of-Publication;Publisher;Image-URL-S;Image-URL-M;Image-URL-L;Average-Rating
-        csv_row = f"{isbn};{entry.title};{entry.author};{entry.year};{entry.publisher};https://via.placeholder.com/150;https://via.placeholder.com/300;{entry.image_url};{entry.rating}"
+        # Ensure we wrap strings in quotes to avoid breaking the ';' CSV separator
+        csv_row = f'{isbn};"{entry.title}";"{entry.author}";{entry.year};"{entry.publisher}";"https://via.placeholder.com/150";"https://via.placeholder.com/300";"{entry.image_url}";{entry.rating}'
         
         with open(filepath, "a", encoding="utf-8") as f:
             if not file_exists or os.stat(filepath).st_size == 0:
                 f.write("ISBN;Book-Title;Book-Author;Year-Of-Publication;Publisher;Image-URL-S;Image-URL-M;Image-URL-L;Average-Rating\n")
             f.write(csv_row + "\n")
             
+        # Inject into memory instantly for zero-latency searchability
+        if hasattr(engine, "delta_data") and engine.delta_data is not None:
+            engine.delta_data["metadata"][isbn] = [
+                entry.title,
+                entry.author,
+                entry.publisher,
+                entry.year,
+                entry.image_url,
+                str(entry.rating)
+            ]
+            engine.delta_data["isbns"].append(isbn)
+            
+            # Simple keyword extraction to allow immediate BM25 matching
+            text_to_tokenize = (entry.title + " " + entry.author + " " + entry.publisher).lower()
+            for word in text_to_tokenize.split():
+                if len(word) > 2:
+                    engine.delta_data["keywords"][word].append(isbn)
+            
+            engine.cache.clear()
+
         return {
             "status": "success",
             "message": f"Book '{entry.title}' committed to archive.",

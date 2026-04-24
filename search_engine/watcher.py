@@ -70,56 +70,63 @@ class IncrementalIndexer:
             print(f"Error reading {file_path}: {e}")
             return
 
-        for _, row in df.iterrows():
-            isbn = str(row['ISBN'])
-            if isbn in self.delta_data["metadata"]: continue # Already in delta
-            
-            # 1. Metadata
-            # Extract Image-URL-L (Large). User reported 'nan' because they were pointing to another field.
-            image_url = str(row.get('Image-URL-L', 'nan'))
-            if image_url == 'nan' or not image_url.startswith('http'):
-                # Fallback if specific column is missing or empty
-                potential_urls = [str(row.get('Image-URL-M', '')), str(row.get('Image-URL-S', ''))]
-                for p in potential_urls:
-                    if p.startswith('http'):
-                        image_url = p
-                        break
+        if 'Book-Title' not in df.columns:
+            return
 
-            details = [
-                str(row['Book-Title']),
-                str(row['Book-Author']),
-                str(row['Publisher']),
-                str(row['Year-Of-Publication']),
-                image_url,
-                str(row['Average-Rating'])
-            ]
-            self.delta_data["metadata"][isbn] = details
-            self.delta_data["isbns"].append(isbn)
-            
-            # 2. Keywords (NLP)
-            text = (str(row['Book-Title']) + ' ' + str(row['Book-Author']) + ' ' + str(row['Publisher'])).lower()
-            doc = self.nlp(text)
-            lemmas = []
-            for token in doc:
-                if token.is_alpha and not token.is_stop and token.pos_ in self.allowed_pos:
-                    lemma = token.lemma_.lower()
-                    if lemma not in self.domain_stop_words:
-                        lemmas.append(lemma)
-                        self.delta_data["keywords"][lemma].append(isbn)
-                        # Add to Trie for autocomplete
-                        self.update_trie(lemma)
-            
-            # 3. Semantic Vector
-            vecs = [self.glove[w] for w in lemmas if w in self.glove]
-            if vecs:
-                avg_vec = np.mean(vecs, axis=0)
-                norm = np.linalg.norm(avg_vec)
-                if norm > 0: avg_vec = avg_vec / norm
-                self.delta_data["vectors"].append(avg_vec)
-            else:
-                self.delta_data["vectors"].append(np.zeros(self.dim, dtype=np.float32))
-            
-            self.total_new_books += 1
+        for _, row in df.iterrows():
+            try:
+                isbn = str(row['ISBN'])
+                if isbn in self.delta_data["metadata"]: continue # Already in delta
+                
+                # 1. Metadata
+                # Extract Image-URL-L (Large). User reported 'nan' because they were pointing to another field.
+                image_url = str(row.get('Image-URL-L', 'nan'))
+                if image_url == 'nan' or not image_url.startswith('http'):
+                    # Fallback if specific column is missing or empty
+                    potential_urls = [str(row.get('Image-URL-M', '')), str(row.get('Image-URL-S', ''))]
+                    for p in potential_urls:
+                        if p.startswith('http'):
+                            image_url = p
+                            break
+
+                details = [
+                    str(row['Book-Title']),
+                    str(row['Book-Author']),
+                    str(row['Publisher']),
+                    str(row['Year-Of-Publication']),
+                    image_url,
+                    str(row['Average-Rating'])
+                ]
+                self.delta_data["metadata"][isbn] = details
+                self.delta_data["isbns"].append(isbn)
+                
+                # 2. Keywords (NLP)
+                text = (str(row['Book-Title']) + ' ' + str(row['Book-Author']) + ' ' + str(row['Publisher'])).lower()
+                doc = self.nlp(text)
+                lemmas = []
+                for token in doc:
+                    if token.is_alpha and not token.is_stop and token.pos_ in self.allowed_pos:
+                        lemma = token.lemma_.lower()
+                        if lemma not in self.domain_stop_words:
+                            lemmas.append(lemma)
+                            self.delta_data["keywords"][lemma].append(isbn)
+                            # Add to Trie for autocomplete
+                            self.update_trie(lemma)
+                
+                # 3. Semantic Vector
+                vecs = [self.glove[w] for w in lemmas if w in self.glove]
+                if vecs:
+                    avg_vec = np.mean(vecs, axis=0)
+                    norm = np.linalg.norm(avg_vec)
+                    if norm > 0: avg_vec = avg_vec / norm
+                    self.delta_data["vectors"].append(avg_vec)
+                else:
+                    self.delta_data["vectors"].append(np.zeros(self.dim, dtype=np.float32))
+                
+                self.total_new_books += 1
+            except Exception as e:
+                print(f"Error processing row {row.get('ISBN', 'Unknown')}: {e}")
+                continue
 
         # Atomic Save Delta
         temp_file = self.delta_file + ".tmp"
@@ -166,13 +173,16 @@ class IncrementalIndexer:
         print(f"Watcher started. Monitoring {self.new_content_dir} ...")
         while True:
             # 1. Process all CSV files in directory (legacy support + single file support)
-            files = [f for f in os.listdir(self.new_content_dir) if f.endswith('.csv')]
+            files = [f for f in os.listdir(self.new_content_dir) if f.endswith('.csv') and "ratings" not in f.lower()]
             for f in files:
                 full_path = os.path.join(self.new_content_dir, f)
                 # For the consolidated file, we always check it. 
                 # For other files, we skip if already processed to save time.
                 if f == "new_books.csv" or full_path not in self.processed_files:
-                    self.process_file(full_path)
+                    try:
+                        self.process_file(full_path)
+                    except Exception as e:
+                        print(f"Critical error in process_file for {f}: {e}")
                     self.processed_files.add(full_path)
             
             time.sleep(15)
