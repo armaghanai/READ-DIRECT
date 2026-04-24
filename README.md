@@ -45,4 +45,4 @@ npm run dev
 Navigate to `http://localhost:5173` entirely bypassing cloud latency. 
 
 ## Contribution & Authentication
-To add new books to the physical disc arrays or adjust the 1-10 overall trailing average ratings, interact with the floating **CONTRIBUTE FOLIO** button respectively. You will be elegantly for the password if you have the access.
+To add new books to the physical disc arrays or adjust the 1-10 overall trailing average ratings, interact with the floating **CONTRIBUTE FOLIO** button respectively. You will be elegantly asked for the password if you have the access.
