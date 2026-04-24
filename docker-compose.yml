@@ -1,0 +1,14 @@
+services:
+  digital-library:
+    build: .
+    container_name: digital-library
+    ports:
+      - "3000:80"      # Access the app at http://localhost:3000
+    volumes:
+      # Mount your local data directories into the container
+      - ./books_data:/app/books_data
+      - ./embeddings:/app/embeddings
+    environment:
+      - PROJECT_ROOT=/app
+      - ADMIN_API_KEY=admin123   # Change this in production!
+    restart: unless-stopped

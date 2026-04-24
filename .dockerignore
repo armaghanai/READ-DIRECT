@@ -1,0 +1,40 @@
+# Version control
+.git
+.gitignore
+
+# Python
+__pycache__
+*.py[cod]
+*$py.class
+.env
+.venv
+env/
+venv/
+
+# Frontend build artifacts (rebuilt in Docker)
+frontend/node_modules
+frontend/dist
+frontend/*.log
+
+# IDE
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Data files (mounted as volumes, not baked into image)
+books_data/
+embeddings/
+
+# Docker
+Dockerfile
+docker-compose.yml
+.dockerignore
+
+# Misc
+*.md
+fix_csv.py
+test_api.py

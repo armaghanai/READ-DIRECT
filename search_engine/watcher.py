@@ -22,12 +22,13 @@ def load_glove_bin(path):
 
 class IncrementalIndexer:
     def __init__(self):
-        self.new_content_dir = r"d:\MyProjects\DigitalLibrary\books_data\new_content"
-        self.index_dir = r"d:\MyProjects\DigitalLibrary\books_data\index"
-        self.main_csv = r"d:\MyProjects\DigitalLibrary\books_data\books.csv"
-        self.lexicon_file = r"d:\MyProjects\DigitalLibrary\books_data\lexicon.csv"
+        project_root = os.environ.get("PROJECT_ROOT", os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        self.new_content_dir = os.path.join(project_root, "books_data", "new_content")
+        self.index_dir = os.path.join(project_root, "books_data", "index")
+        self.main_csv = os.path.join(project_root, "books_data", "books.csv")
+        self.lexicon_file = os.path.join(project_root, "books_data", "lexicon.csv")
         self.delta_file = os.path.join(self.index_dir, "delta_index.bin")
-        self.glove_path = r"d:\MyProjects\DigitalLibrary\embeddings\glove.6B.100d.bin"
+        self.glove_path = os.path.join(project_root, "embeddings", "glove.6B.100d.bin")
         
         self.processed_files = set()
         self.total_new_books = 0

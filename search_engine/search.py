@@ -11,9 +11,10 @@ from collections import defaultdict, OrderedDict
 
 class SearchEngine:
     def __init__(self):
-        self.index_dir = r"d:\MyProjects\DigitalLibrary\books_data\index"
-        self.lexicon_file = r"d:\MyProjects\DigitalLibrary\books_data\lexicon.csv"
-        self.glove_path = r"d:\MyProjects\DigitalLibrary\embeddings\glove.6B.100d.bin"
+        project_root = os.environ.get("PROJECT_ROOT", os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        self.index_dir = os.path.join(project_root, "books_data", "index")
+        self.lexicon_file = os.path.join(project_root, "books_data", "lexicon.csv")
+        self.glove_path = os.path.join(project_root, "embeddings", "glove.6B.100d.bin")
         self.delta_file = os.path.join(self.index_dir, "delta_index.bin")
         
         print("Initializing Search Engine... (Loading data into RAM)", flush=True)

@@ -85,7 +85,8 @@ async def add_book(entry: BookEntry, x_api_key: str = Header(None)):
         isbn = str(random.randint(1000000000, 9999999999))
         
         # 2. Path
-        new_content_dir = r"d:\MyProjects\DigitalLibrary\books_data\new_content"
+        project_root = os.environ.get("PROJECT_ROOT", os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        new_content_dir = os.path.join(project_root, "books_data", "new_content")
         os.makedirs(new_content_dir, exist_ok=True)
         filepath = os.path.join(new_content_dir, "new_books.csv")
         
@@ -137,7 +138,8 @@ async def update_rating(isbn: str, rating: float = Query(..., ge=0, le=10), x_ap
     if x_api_key != ADMIN_KEY:
         raise HTTPException(status_code=401, detail="Unauthorized API Key")
     try:
-        new_content_dir = r"d:\MyProjects\DigitalLibrary\books_data\new_content"
+        project_root = os.environ.get("PROJECT_ROOT", os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        new_content_dir = os.path.join(project_root, "books_data", "new_content")
         os.makedirs(new_content_dir, exist_ok=True)
         filepath = os.path.join(new_content_dir, "new_ratings.csv")
         file_exists = os.path.exists(filepath)
