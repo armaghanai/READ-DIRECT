@@ -4,7 +4,8 @@ import requests
 import struct
 import random
 import time
-from fastapi import FastAPI, Query, Response, HTTPException
+import subprocess
+from fastapi import FastAPI, Query, Header, Response, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from typing import List, Optional
@@ -26,6 +27,20 @@ app.add_middleware(
 
 # Initialize Search Engine as a singleton
 engine = SearchEngine()
+
+# Initialize API Auth
+env_path = os.path.join(os.path.dirname(__file__), ".env")
+if os.path.exists(env_path):
+    with open(env_path, "r") as f:
+        for line in f:
+            line = line.strip()
+            if line and not line.startswith("#") and "=" in line:
+                k, v = line.split("=", 1)
+                os.environ[k.strip()] = v.strip()
+
+ADMIN_KEY = os.environ.get("ADMIN_API_KEY")
+if not ADMIN_KEY:
+    raise ValueError("CRITICAL: ADMIN_API_KEY env variable is required but missing. Add it to your .env file.")
 
 class BookEntry(BaseModel):
     title: str
@@ -58,11 +73,13 @@ async def suggest(q: str = Query(..., min_length=1)):
     }
 
 @app.post("/books")
-async def add_book(entry: BookEntry):
+async def add_book(entry: BookEntry, x_api_key: str = Header(None)):
     """
     Manually adds a new folio entry. 
     Saves it as a CSV snippet in the watcher's dropzone.
     """
+    if x_api_key != ADMIN_KEY:
+        raise HTTPException(status_code=401, detail="Unauthorized API Key")
     try:
         # 1. Generate logic
         isbn = str(random.randint(1000000000, 9999999999))
@@ -70,16 +87,18 @@ async def add_book(entry: BookEntry):
         # 2. Path
         new_content_dir = r"d:\MyProjects\DigitalLibrary\books_data\new_content"
         os.makedirs(new_content_dir, exist_ok=True)
-        filename = f"manual_{isbn}.csv"
-        filepath = os.path.join(new_content_dir, filename)
+        filepath = os.path.join(new_content_dir, "new_books.csv")
         
-        # 3. Headers: ISBN;Book-Title;Book-Author;Year-Of-Publication;Publisher;Image-URL-S;Image-URL-M;Image-URL-L;Average-Rating
-        # Use placeholders for S/M as we only care about L
+        file_exists = os.path.exists(filepath)
+        
+        # 3. CSV Row preparation
+        # ISBN;Book-Title;Book-Author;Year-Of-Publication;Publisher;Image-URL-S;Image-URL-M;Image-URL-L;Average-Rating
         csv_row = f"{isbn};{entry.title};{entry.author};{entry.year};{entry.publisher};https://via.placeholder.com/150;https://via.placeholder.com/300;{entry.image_url};{entry.rating}"
         
-        with open(filepath, "w", encoding="utf-8") as f:
-            f.write("ISBN;Book-Title;Book-Author;Year-Of-Publication;Publisher;Image-URL-S;Image-URL-M;Image-URL-L;Average-Rating\n")
-            f.write(csv_row)
+        with open(filepath, "a", encoding="utf-8") as f:
+            if not file_exists or os.stat(filepath).st_size == 0:
+                f.write("ISBN;Book-Title;Book-Author;Year-Of-Publication;Publisher;Image-URL-S;Image-URL-M;Image-URL-L;Average-Rating\n")
+            f.write(csv_row + "\n")
             
         return {
             "status": "success",
@@ -88,6 +107,63 @@ async def add_book(entry: BookEntry):
             "processed_locally": False, # Will be handled by watcher
             "latency_ms": 0
         }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/books/{isbn}/rate")
+async def update_rating(isbn: str, rating: float = Query(..., ge=0, le=10), x_api_key: str = Header(None)):
+    """
+    Update a book's rating. Saves to a local CSV and dynamically replaces 
+    """
+    if x_api_key != ADMIN_KEY:
+        raise HTTPException(status_code=401, detail="Unauthorized API Key")
+    try:
+        new_content_dir = r"d:\MyProjects\DigitalLibrary\books_data\new_content"
+        os.makedirs(new_content_dir, exist_ok=True)
+        filepath = os.path.join(new_content_dir, "new_ratings.csv")
+        file_exists = os.path.exists(filepath)
+        
+        # Calculate trailing average with active metadata cache
+        final_rating = rating
+        if hasattr(engine, "metadata_cache") and isbn in engine.metadata_cache:
+            meta = list(engine.metadata_cache[isbn])
+            old_idx = 5 if len(meta) == 6 else 4
+            old_rating = float(meta[old_idx])
+            if old_rating > 0:
+                final_rating = round((old_rating + rating) / 2.0, 1)
+        elif hasattr(engine, "delta_data") and engine.delta_data and "metadata" in engine.delta_data and isbn in engine.delta_data["metadata"]:
+            meta = list(engine.delta_data["metadata"][isbn])
+            old_idx = 5 if len(meta) == 6 else 4
+            old_rating = float(meta[old_idx])
+            if old_rating > 0:
+                final_rating = round((old_rating + rating) / 2.0, 1)
+
+        with open(filepath, "a", encoding="utf-8") as f:
+            if not file_exists or os.stat(filepath).st_size == 0:
+                f.write("ISBN;Rating\n")
+            f.write(f"{isbn};{final_rating}\n")
+            
+        # Dynamically inject into search engine metadata cache
+        if hasattr(engine, "metadata_cache") and isbn in engine.metadata_cache:
+            meta = list(engine.metadata_cache[isbn])
+            if len(meta) == 6:
+                meta[5] = str(final_rating)
+            elif len(meta) == 5:
+                meta[4] = str(final_rating)
+            engine.metadata_cache[isbn] = tuple(meta)
+            engine.cache.clear() # purge front cache
+
+        # Update in delta_data if present
+        if hasattr(engine, "delta_data") and engine.delta_data and "metadata" in engine.delta_data and isbn in engine.delta_data["metadata"]:
+            meta = list(engine.delta_data["metadata"][isbn])
+            if len(meta) == 6:
+                meta[5] = str(final_rating)
+            elif len(meta) == 5:
+                meta[4] = str(final_rating)
+            engine.delta_data["metadata"][isbn] = tuple(meta)
+            engine.cache.clear()
+
+        return {"status": "success", "isbn": isbn, "new_rating": final_rating}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -124,5 +200,8 @@ async def proxy_image(url: str):
         return Response(status_code=500, content=f"Proxy error: {str(e)}")
 
 if __name__ == "__main__":
+    watcher_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "search_engine", "watcher.py")
+    watcher_proc = subprocess.Popen([sys.executable, watcher_path])
+    print(f"Started background watcher service (PID {watcher_proc.pid})")
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)

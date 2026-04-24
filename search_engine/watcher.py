@@ -163,14 +163,18 @@ class IncrementalIndexer:
         # self.total_new_books = 0
 
     def run(self):
-        print("Watcher started. Monitoring books_data/new_content/ ...")
+        print(f"Watcher started. Monitoring {self.new_content_dir} ...")
         while True:
+            # 1. Process all CSV files in directory (legacy support + single file support)
             files = [f for f in os.listdir(self.new_content_dir) if f.endswith('.csv')]
             for f in files:
                 full_path = os.path.join(self.new_content_dir, f)
-                if full_path not in self.processed_files:
+                # For the consolidated file, we always check it. 
+                # For other files, we skip if already processed to save time.
+                if f == "new_books.csv" or full_path not in self.processed_files:
                     self.process_file(full_path)
                     self.processed_files.add(full_path)
+            
             time.sleep(15)
 
 if __name__ == "__main__":
