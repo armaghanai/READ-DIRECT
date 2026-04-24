@@ -17,3 +17,4 @@ jobs:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: |
           git push --force https://armaghanai:$HF_TOKEN@huggingface.co/spaces/armaghanai/READ-DIRECT main
+# trigger sync
