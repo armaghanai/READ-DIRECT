@@ -1,3 +1,13 @@
+---
+title: READ DIRECT
+emoji: 📚
+colorFrom: blue
+colorTo: indigo
+sdk: docker
+pinned: false
+suggested_storage: small
+---
+
 # Digital Library Platform
 
 A high-performance, dynamic archival literature search engine constructed entirely offline. This ecosystem blends **FastAPI**, **React (Vite)**, and a custom **Hybrid NLP Search Engine** with GloVe embeddings to enable instant searching of millions of out-of-print books.
