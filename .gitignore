@@ -1,5 +1,7 @@
 # Python / Core
 books_data/index/
+books_data/books.csv
+books_data/new_books.csv
 books_data/new_content/*.bin
 __pycache__/
 *.py[cod]
