@@ -25,16 +25,12 @@ frontend/*.log
 *.sln
 *.sw?
 
-# Data files (mounted as volumes, not baked into image)
-books_data/
-embeddings/
-
 # Docker
 Dockerfile
 docker-compose.yml
 .dockerignore
 
 # Misc
-*.md
 fix_csv.py
 test_api.py
+.github/

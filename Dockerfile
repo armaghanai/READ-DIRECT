@@ -53,15 +53,22 @@ COPY backend/ ./backend/
 COPY search_engine/ ./search_engine/
 COPY indexer/ ./indexer/
 
-# Data directories (mount these as volumes for persistence)
-RUN mkdir -p /app/books_data/index \
-             /app/books_data/new_content \
-             /app/embeddings
+# Copy data directories INTO the image (required for HF Spaces — no volume mounts)
+COPY books_data/ ./books_data/
+COPY embeddings/ ./embeddings/
 
-# Nginx config: serve frontend + proxy /api to backend
+# Ensure writable directories exist for runtime contributions
+RUN mkdir -p /app/books_data/index \
+             /app/books_data/new_content
+
+# Set PYTHONPATH so the backend can locate search_engine modules
+ENV PYTHONPATH=/app
+ENV PROJECT_ROOT=/app
+
+# Nginx config: serve frontend on 7860 + proxy API to backend on 8000
 RUN cat > /etc/nginx/sites-available/default <<'NGINX'
 server {
-    listen 80;
+    listen 7860;
     server_name _;
 
     # Frontend (React SPA)
@@ -99,26 +106,27 @@ server {
 }
 NGINX
 
-# Entrypoint script
+# Entrypoint script — no env logging, chmod for non-root HF user
 RUN cat > /app/start.sh <<'EOF'
 #!/bin/bash
 set -e
 
-export PROJECT_ROOT=/app
+# Grant write access for HF's non-root user
+chmod -R 777 /app
+chmod -R 777 /var/lib/nginx
+chmod -R 777 /var/log/nginx
+chmod -R 777 /run
 
 # Start nginx in background
 nginx
 
-# Start backend (which also spawns watcher)
+# Start backend on port 8000 (proxied by nginx on 7860)
 cd /app
 exec python backend/main.py
 EOF
 RUN chmod +x /app/start.sh
 
-# Expose port 80 (nginx) for the unified app
-EXPOSE 80
-
-ENV PROJECT_ROOT=/app
-ENV ADMIN_API_KEY=admin123
+# HF Spaces requires port 7860
+EXPOSE 7860
 
 CMD ["/app/start.sh"]
