@@ -54,6 +54,13 @@ class BookEntry(BaseModel):
 async def root():
     return {"message": "Digital Library Search Engine API is online.", "developer": "Armaghan Mahmood Shams"}
 
+@app.post("/verify-key")
+async def verify_key(x_api_key: str = Header(None)):
+    """Validates admin API key without performing any action."""
+    if x_api_key != ADMIN_KEY:
+        raise HTTPException(status_code=401, detail="Invalid API Key")
+    return {"status": "authorized"}
+
 @app.get("/search")
 async def search(q: str = Query(..., min_length=1), top_n: int = 15):
     results, duration = engine.hybrid_search(q, top_n=top_n)
