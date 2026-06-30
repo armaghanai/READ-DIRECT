@@ -24,7 +24,7 @@ A high-performance, dynamic archival literature search engine constructed entire
    - `/proxy-image`: Native Python proxying layer bypassing strict HTTP/HTTPS mixed-content cors lockouts from legacy archival databases.
    - **Watcher Process Node:** A discrete `watcher.py` NLP service runs constantly in the background using `subprocess.Popen` to ingest newly contributed books (via `new_books.csv`) into the delta index every 15 seconds.
 
-3. **Hybrid Search Engine Engine (`search_engine/`)**
+3. **Hybrid Search Engine (`search_engine/`)**
    - Combines traditional keyword BM25 retrieval with dense vector (GloVe-100d / spaCy) semantic mapping.
    - Built exactly for scale: Uses binary memory mapping files (`.bin`) and heavily sharded index barrels to operate entirely offline without an external SQL database.
 
